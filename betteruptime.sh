@@ -5,6 +5,7 @@
 # ------------
 VERSION=0.0.1
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+SCRIPT=betteruptime
 DEBUG="0"
 
 # -- Colors
@@ -20,13 +21,17 @@ ECOL="\e[0m"
 # -------
 # -- Help
 # -------
+USAGE_FOOTER=\
+"Version: $VERSION
+Type $SCRIPT help for more."
+
 USAGE=\
-"$0 [-a <apikey>|-d] <command>
+"$SCRIPT [-a <apikey>|-d] <command>
 
 Commands:
 	test			 - Test Better Uptime API key.
-	list             - List Monitors
-	create           - Create Monitors
+	list             - List objects
+	create           - Create object
 
 Options:
     -a               - Better Uptime apikey team (Optional)
@@ -38,13 +43,25 @@ API Key:
     a team API key. The format as follows.
 
 	Default API Key:  BU_KEY=\"\"
-    Team API Key:     TEAM_BU_KEY=\"\"
+	Team API Key:     TEAM_BU_KEY=\"\"
     
     Replace TEAM with your placeholder and pass \"-a TEAM\" option. If -a isn't
     set then the default BU_KEY is used.
 
-Version: $VERSION
+${USAGE_FOOTER}
 "
+
+USAGE_LIST=\
+"$SCRIPT [-a <apikey>|-d] list <object>
+
+Objects:
+	monitors         - Create monitor.
+	heartbeat        - Create Heartbeat.
+
+${USAGE_FOOTER}
+"
+
+
 
 # ------------
 # -- Functions
@@ -72,7 +89,7 @@ _separator () {
 }
 
 _debug () {
-    if [ -f $SCRIPT_DIR/.debug ]; then
+    if [[ -f $SCRIPT_DIR/.debug ]] || [[ $DEBUG == "1" ]]; then
         echo -e "${CYAN}** DEBUG: $@${ECOL}"
     fi
 }
@@ -84,69 +101,13 @@ _debug_json () {
 }
 
 usage () {
-    echo "$USAGE"
-}
-
-# -- betteruptime-api <$API_PATH>
-betteruptime-api() {
-	local $API_PATH	
-	API_PATH=$1
-	_debug "\$API_PATH: $API_PATH"
-
-	#if [[ $DEBUG == "1" ]];then set +x;fi
-	CURL_OUTPUT=$(curl -s --request GET \
-		 --url "https://betteruptime.com${API_PATH}" \
-		 --header 'Authorization: Bearer '"${BU_KEY}"'')
-	#if [[ $DEBUG == "1" ]];then set -x;fi
-	CURL_EXIT_CODE="$?"
-	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
-		_error "Error from API ${CURL_EXIT_CODE}"
-		_debug "$CURL_OUTPUT"
-		return 1
+	if [[ -z $1 ]]; then
+	    echo "$USAGE"
 	else
-	 	_debug "$CURL_OUTPUT" 	     
-	 	#echo ${CURL_OUTPUT} | jq -r
+		USAGE_TEXT="USAGE_${1}"
+		echo "${!USAGE_TEXT}"
 	fi
 }
-
-# -- betteruptime-api-creds
-betteruptime-api-creds() {
-	if [[ -f ~/.betteruptime ]]; then
-		_debug "Found $HOME/.betteruptime"
-	    source $HOME/.betteruptime
-	else
-		usage
-	    _error "Can't find $HOME/.cloudflare exiting."	    
-	    exit 1
-	fi
-}
-
-# -- betteruptime-api-test
-betteruptime-api-test() {	
-	betteruptime-api /api/v2/monitors	
-	_debug $?
-	if [[ -z $? ]]; then
-		_success "Better Uptime API connection working!"
-		exit 0
-	else
-		_error "Better Uptime API connection not working!"
-		exit 1
-	fi
-}
-
-# ------------
-# -- Main loop
-# ------------
-
-# -- check better uptime credentials
-betteruptime-api-creds
-
-# -- check if parameters are set
-_debug "PARAMS: $@"
-if [[ -z $1 ]];then
-	usage
-	exit 1
-fi
 
 # -- options
 POSITIONAL=()
@@ -166,6 +127,11 @@ case $key in
     _debug "\$DEBUG: $DEBUG"
     shift # past argument
     ;;
+    -j|--json)
+    JSON_OUTPUT="1"
+    _debug "\$JSON_OUTPUT: $JSON_OUTPUT"
+    shift # past argument
+    ;;
     *)    # unknown option
     POSITIONAL+=("$1") # save it in an array for later
     shift # past argument
@@ -174,14 +140,80 @@ esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
+# -- betteruptime-api <$API_PATH>
+betteruptime-api() {
+	_debug "Running betteruptime-api() with $@"
+	local $API_PATH	
+	API_PATH=$1
+
+	#if [[ $DEBUG == "1" ]];then set +x;fi
+	CURL_OUTPUT=$(curl -s --request GET \
+		 --url "https://betteruptime.com${API_PATH}" \
+		 --header 'Authorization: Bearer '"${BU_KEY}"'')
+	#if [[ $DEBUG == "1" ]];then set -x;fi
+	
+	CURL_EXIT_CODE="$?"
+	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
+		_error "Error from API: ${CURL_EXIT_CODE}"
+		return 1
+	elif [[ $CURL_OUTPUT == *"error"* ]]; then
+		_error "Error from API: $CURL_OUTPUT"	
+		_debug "$CURL_OUTPUT"
+		return 1
+	else
+	 	_debug "Success from API: $CURL_OUTPUT"
+	 	_debug "$CURL_OUTPUT"
+	fi
+}
+
+# -- betteruptime-api-creds
+betteruptime-api-creds() {
+	if [[ -f ~/.betteruptime ]]; then
+		_debug "Found $HOME/.betteruptime"
+	    source $HOME/.betteruptime
+	else
+		usage
+	    _error "Can't find $HOME/.cloudflare exiting."	    
+	    exit 1
+	fi
+}
+
+# -- betteruptime-api-test
+betteruptime-api-test() {	
+	betteruptime-api /api/v2/monitors	
+	_debug "\$CURL_EXIT_CODE: $CURL_EXIT_CODE"
+	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
+        _error "Better Uptime API connection not working!"
+        exit 1
+	else
+		_success "Better Uptime API connection working!"
+		exit 0
+	fi
+}
+
+# ------------
+# -- Main loop
+# ------------
+
+# -- check better uptime credentials
+betteruptime-api-creds
+
+# -- check if parameters are set
 _debug "PARAMS: $@"
+if [[ -z $1 ]];then
+	usage
+	exit 1
+fi
+
+# -- commands
 CMD1=$1
+_debug "\$CMD1:$CMD1"
 shift
     case "$CMD1" in
         # -- usage
         help)
 		usage
-		exit 1
+		exit
         ;;
 
 		# -- test
@@ -191,7 +223,31 @@ shift
 		
         # -- list
         list)
-        echo "list"
+        CMD2=$1
+        _debug "\$CMD2:$CMD2"
+        shift
+        	case "$CMD2" in
+        		# -- monitors
+        		monitors)
+					betteruptime-api /api/v2/monitors
+        			if [[ $JSON_OUTPUT == "1" ]]; then
+						echo $CURL_OUTPUT
+						exit
+					else
+						_running "Listing monitors"
+						_debug "Outputting clean"
+						echo $CURL_OUTPUT | jq -r 
+						exit
+					fi
+        		;;
+        		heartbeats)
+        		echo "heartbeats"
+        		exit
+        		;;
+        		*)
+        		usage LIST
+        		exit 1
+        	esac
         ;;
 
 		# -- add
