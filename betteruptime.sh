@@ -236,7 +236,17 @@ shift
 					else
 						_running "Listing monitors"
 						_debug "Outputting clean"
-						echo $CURL_OUTPUT | jq -r 
+						PARSED_OUTPUT=$(echo $CURL_OUTPUT | jq -r '(["ID","MONITOR_TYPE","URL","PRONAME","GROUP","STATUS"] |
+							(., map(length*"-"))),
+							(.data[] | [ .id,
+							.attributes["monitor_type"],
+							.attributes["url"],
+							.attributes["pronounceable_name"],
+							.attributes["monitor_group_id"],
+							.attributes["status"]
+							])|join(",")' | column -t -s ',')
+						HEADER_OUTPUT=$(printf "$PARSED_OUTPUT" | awk 'FNR <= 2')
+						printf "$PARSED_OUTPUT" | awk -v h="$HEADER_OUTPUT" '{print}; NR % 10 == 0 {print "\n" h}'
 						exit
 					fi
         		;;
