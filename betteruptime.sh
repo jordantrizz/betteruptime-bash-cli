@@ -22,7 +22,11 @@ ECOL="\e[0m"
 USAGE=\
 "$0 <command>
 
-Version: $VERSION"
+Betteruptime API Credentials should be placed in \$HOME/.cloudflare
+  BU_KEY=\"\"
+
+Version: $VERSION
+"
 
 # ------------
 # -- Functions
@@ -65,9 +69,43 @@ usage () {
     echo "$USAGE"
 }
 
+# -- betteruptime-api <$API_PATH>
+betteruptime-api() {
+	local $API_PATH	
+	API_PATH=$1
+
+	CURL_OUTPUT=$(curl -s --request GET \
+		 --url https://betteruptime.com/${API_PATH} \
+  	     --header 'Authorization: Bearer "'${BU-KEY}'"')
+  	_debug "$CURL_OUTPUT" 	     
+	CURL_OUTPUT_JQ=$(echo $CURL_OUTPUT | jq -r)
+    return $CURL_OUTPUT_JQ  	
+}
+
+# -- betteruptime-api-creds
+betteruptime-api-creds() {
+	if [[ -f ~/.betteruptime ]]; then
+		_debug "Found $HOME/.betteruptime"
+	    source $HOME/.betteruptime
+	else
+		usage
+	    _error "Can't find $HOME/.cloudflare exiting."	    
+	    exit 1
+	fi
+}
+
+# -- betteruptime-api-test
+betteruptime-api-test() {
+	betteruptime-api
+}
+
 # ------------
 # -- Main loop
 # ------------
+
+betteruptime-api-creds
+betteruptime-api-test
+
 
 if [[ -z $1 ]];then
 	usage
