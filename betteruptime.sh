@@ -93,13 +93,20 @@ betteruptime-api() {
 	API_PATH=$1
 	_debug "\$API_PATH: $API_PATH"
 
-#    if [[ $DEBUG == "1" ]];then set +x;fi
+	#if [[ $DEBUG == "1" ]];then set +x;fi
 	CURL_OUTPUT=$(curl -s --request GET \
 		 --url "https://betteruptime.com${API_PATH}" \
 		 --header 'Authorization: Bearer '"${BU_KEY}"'')
-#    if [[ $DEBUG == "1" ]];then set -x;fi
-  	_debug "$CURL_OUTPUT" 	     
-	echo ${CURL_OUTPUT} | jq -r 
+	#if [[ $DEBUG == "1" ]];then set -x;fi
+	CURL_EXIT_CODE="$?"
+	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
+		_error "Error from API ${CURL_EXIT_CODE}"
+		_debug "$CURL_OUTPUT"
+		return 1
+	else
+	 	_debug "$CURL_OUTPUT" 	     
+	 	#echo ${CURL_OUTPUT} | jq -r
+	fi
 }
 
 # -- betteruptime-api-creds
@@ -116,7 +123,15 @@ betteruptime-api-creds() {
 
 # -- betteruptime-api-test
 betteruptime-api-test() {	
-	betteruptime-api /api/v2/monitors
+	betteruptime-api /api/v2/monitors	
+	_debug $?
+	if [[ -z $? ]]; then
+		_success "Better Uptime API connection working!"
+		exit 0
+	else
+		_error "Better Uptime API connection not working!"
+		exit 1
+	fi
 }
 
 # ------------
@@ -158,3 +173,36 @@ case $key in
 esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
+
+_debug "PARAMS: $@"
+CMD1=$1
+shift
+    case "$CMD1" in
+        # -- usage
+        help)
+		usage
+		exit 1
+        ;;
+
+		# -- test
+        test)
+        betteruptime-api-test
+		;;
+		
+        # -- list
+        list)
+        echo "list"
+        ;;
+
+		# -- add
+        add)
+		echo "add"
+        ;;
+
+		# -- catchall
+        *)
+        usage
+        _error "No command specified"
+        exit 1
+        ;;
+esac
