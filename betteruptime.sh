@@ -3,7 +3,7 @@
 # ==================================
 # -- Variables
 # ==================================
-VERSION=0.0.1
+VERSION=0.1.0
 SCRIPT_NAME=betteruptime-cli
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 API_URL="https://betteruptime.com/api/v2"
@@ -40,24 +40,26 @@ USAGE=\
 "$SCRIPT_NAME [-a <apikey>|-d] <command>
 
 Commands:
-	test			 - Test Better Uptime API key.
-	list             - List objects
-	create           - Create object
+	test                - Test Better Uptime API key.
+	list <monitor>      - List objects
+	create               - Create object
+    search <string>      - Search for <string>
 
 Options:
     -a               - Better Uptime apikey team (Optional)
     -d               - Debug mode (Optional)
+    -j               - Debug json mode, print out json
 
 API Key:
     The Better Uptime API Credentials should be placed in \$HOME/.cloudflare
     Since there is a separate API key for teams, you can set a default and set
     a team API key. The format as follows.
 
-	Default API Key:  BU_KEY=\"\"
-	Team API Key:     TEAM_BU_KEY=\"\"
+	Default API Key:  BETTER_UPTIME_APIKEY=\"\"
+	Team API Key:     TEAM_BETTER_UPTIME_APIKEY=\"\"
     
     Replace TEAM with your placeholder and pass \"-a TEAM\" option. If -a isn't
-    set then the default BU_KEY is used.
+    set then the default BETTER_UPTIME_APIKEY is used.
 
 ${USAGE_FOOTER}
 "
@@ -75,28 +77,23 @@ ${USAGE_FOOTER}
 # ==================================
 # -- Core Functions
 # ==================================
-# -- _debug
-_debug () {
-    if [[ $DEBUG -ge "1" ]]; then
-        echo -e "${CCYAN}**** DEBUG ${*}${NC}"
-    fi
-}
 
 # -- messages
-_error () { echo -e "${CRED}** ERROR ** - ${*} ${ECOL}"; } # _error
-_success () { echo -e "${CGREEN}** SUCCESS ** - ${*} ${ECOL}"; } # _success
-_running () { echo -e "${BLUEBG}${*}${ECOL}"; } # _running
-_creating () { echo -e "${DARKGREYBG}${*}${ECOL}"; }
-_separator () { echo -e "${YELLOWBG}****************${ECOL}"; }
+_error () { echo -e "${CRED}** ERROR ** - ${*} ${NC}"; } # _error
+_success () { echo -e "${CGREEN}** SUCCESS ** - ${*} ${NC}"; } # _success
+_running () { echo -e "${BLUEBG}${*}${NC}"; } # _running
+_creating () { echo -e "${DARKGREYBG}${*}${NC}"; }
+_separator () { echo -e "${YELLOWBG}****************${NC}"; }
 _debug () {
     if [[ $DEBUG == "1" ]]; then
-        echo -e "${CCYAN}** DEBUG: ${*}${ECOL}"
+        echo -e "${CCYAN}** DEBUG ${*}${NC}"
     fi
 }
 
-# -- debug_json
+# -- debug_jsons
 _debug_json () {
     if [[ $DEBUG_JSON == "1" ]]; then
+        echo -e "${CCYAN}** Outputting JSON ${*}${NC}"
         echo "${@}" | jq
     fi
 }
@@ -123,7 +120,7 @@ function pre_flight_check () {
 		_debug "Found $HOME/.betteruptime"
 	    source "$HOME/.betteruptime"
 	else
-		if [[ ! $BETTER_UPTIME_API ]]; then
+		if [[ -z $BETTER_UPTIME_APIKEY ]]; then
             usage
 	        _error "Can't find $HOME/.betteruptime or \$BETTER_UPTIME_APIKEY in shell...exiting."	    
 	        exit 1
@@ -139,43 +136,80 @@ function pre_flight_check () {
 
 }
 
-# -- betteruptime-api <$API_PATH>
-betteruptime-api() {
-	_debug "Running betteruptime-api() with ${*}"
-	local $API_PATH	
-	API_PATH=$1
-
-	#if [[ $DEBUG == "1" ]];then set +x;fi
-	CURL_OUTPUT=$(curl -s --request GET \
-		 --url "${API_URL}${API_PATH}" \
-		 --header 'Authorization: Bearer '"${BU_KEY}"'')
-	#if [[ $DEBUG == "1" ]];then set -x;fi
+# -- bu_api <$API_PATH> <$REQUEST>
+function bu_api() {
+	_debug "Running bu_api() with ${*}"
+	local $API_PATH	$REQUEST
+	API_PATH="$1"    
+    CURL_OUTPUT=$(mktemp)
 	
-	CURL_EXIT_CODE="$?"
-	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
-		_error "Error from API: ${CURL_EXIT_CODE}"
-		return 1
-	elif [[ $CURL_OUTPUT == *"error"* ]]; then
-		_error "Error from API: $CURL_OUTPUT"	
-		_debug "$CURL_OUTPUT"
-		return 1
+    _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" --header 'Authorization: Bearer '"${BETTER_UPTIME_APIKEY}"''"
+    CURL_EXIT_CODE=$(curl -s -w "%{http_code}" --request GET\
+	    --request GET \
+	    --url "${API_URL}${API_PATH}" \
+	    --header "Authorization: Bearer ${BETTER_UPTIME_APIKEY}" \
+	    --output "$CURL_OUTPUT")    
+    API_OUTPUT=$(<"$CURL_OUTPUT")
+    _debug_json "$API_OUTPUT"
+    rm $CURL_OUTPUT    
+
+		
+	if [[ $CURL_EXIT_CODE == "200" ]]; then
+	    _debug "Success from API: $CURL_EXIT_CODE"	     
 	else
-	 	_debug "Success from API: $CURL_OUTPUT"
-	 	_debug "$CURL_OUTPUT"
-	fi
+        _error "Error from API: $API_OUTPUT"
+        exit 1
+    fi
 }
 
-# -- betteruptime-api-test
-betteruptime-api-test() {	
-	betteruptime-api /api/v2/monitors	
-	_debug "\$CURL_EXIT_CODE: $CURL_EXIT_CODE"
-	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
+# -- bu_api_test
+function bu_api_test() {	
+    _debug "function:${FUNCNAME[0]}"
+	bu_api /monitors GET		
+	if [[ $? -ge "1" ]]; then
         _error "Better Uptime API connection not working!"
         exit 1
 	else
 		_success "Better Uptime API connection working!"
 		exit 0
 	fi
+}
+
+# -- bu_list_monitors
+function bu_list_monitors () {
+    if [[ $JSON_OUTPUT == "1" ]]; then
+        echo $OUTPUT
+        exit
+    else
+        _running "Listing monitors"
+        _debug "Outputting clean"
+        PARSED_OUTPUT=$(echo $API_OUTPUT | jq -r '(["ID","MONITOR_TYPE","URL","PRONAME","GROUP","STATUS"] |
+            (., map(length*"-"))),
+            (.data[] | [ .id,
+            .attributes["monitor_type"],
+            .attributes["url"],
+            .attributes["pronounceable_name"],
+            .attributes["monitor_group_id"],
+            .attributes["status"]
+            ])|join(",")' | column -t -s ',')
+        HEADER_OUTPUT=$(printf "$PARSED_OUTPUT" | awk 'FNR <= 2')
+        printf "$PARSED_OUTPUT" | awk -v h="$HEADER_OUTPUT" '{print}; NR % 10 == 0 {print "\n" h}'
+        exit
+    fi
+}
+
+# -- bu_create_monitor # TODO need to do this ;)
+function bu_crate_monitors () {
+    _running "Create monitor"    
+    
+}
+
+# -- bu_search
+function bu_search () {
+    _debug "function:${FUNCNAME[0]} $@"
+    bu_api /monitors GET | jq '.data[] | select(.attributes.url | contains("$STRING")) | {id: .id, type: .type}'
+	
+#    echo $BU_SEARCH_RESULTS
 }
 
 # ==================================
@@ -203,12 +237,17 @@ case $key in
     ;;
     -d|--debug)
     DEBUG="1"
-    _debug "\$DEBUG: $DEBUG"
+    _debug "DEBUG enabled!"
     shift # past argument
     ;;
     -j|--json)
     JSON_OUTPUT="1"
     _debug "\$JSON_OUTPUT: $JSON_OUTPUT"
+    shift # past argument
+    ;;
+    -dj|--debug-json)
+    DEBUG_JSON="1"
+    _debug "DEBUG_JSON enabled!"
     shift # past argument
     ;;
     *)    # unknown option
@@ -239,7 +278,7 @@ shift
 
 		#### test
         test)
-            betteruptime-api-test
+            bu_api_test
 		;;
 		
         #### list
@@ -250,26 +289,8 @@ shift
             case "$CMD2" in
                 # -- monitors
                 monitors)
-					betteruptime-api /api/v2/monitors
-                    if [[ $JSON_OUTPUT == "1" ]]; then
-						echo $CURL_OUTPUT
-						exit
-					else
-						_running "Listing monitors"
-						_debug "Outputting clean"
-						PARSED_OUTPUT=$(echo $CURL_OUTPUT | jq -r '(["ID","MONITOR_TYPE","URL","PRONAME","GROUP","STATUS"] |
-							(., map(length*"-"))),
-							(.data[] | [ .id,
-							.attributes["monitor_type"],
-							.attributes["url"],
-							.attributes["pronounceable_name"],
-							.attributes["monitor_group_id"],
-							.attributes["status"]
-							])|join(",")' | column -t -s ',')
-						HEADER_OUTPUT=$(printf "$PARSED_OUTPUT" | awk 'FNR <= 2')
-						printf "$PARSED_OUTPUT" | awk -v h="$HEADER_OUTPUT" '{print}; NR % 10 == 0 {print "\n" h}'
-						exit
-					fi
+					bu_api /monitors GET
+                    bu_list_monitors
                 ;;
                 heartbeats)
                     echo "heartbeats"
@@ -280,10 +301,23 @@ shift
                     exit 1
         	esac
         ;;
-
+        #### search
+        search)
+            if [[ -z ${1} ]]; then
+                _error "Please provide a string: search <string>"
+            else
+                _debug "Searching for ${1}"
+                bu_search ${1}
+            fi
+        ;;
 		#### add
         add)
-		echo "add"
+		    if [[ -z ${1} ]]; then
+                _error "Please provide a string: search <string>"
+            else
+                _debug "Searching for ${1}"
+                bu_search ${1}
+            fi
         ;;
 
 		#### catchall
