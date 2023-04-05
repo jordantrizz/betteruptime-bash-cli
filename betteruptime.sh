@@ -1,32 +1,43 @@
 #!/bin/bash
 
-# ------------
+# ==================================
 # -- Variables
-# ------------
+# ==================================
 VERSION=0.0.1
+SCRIPT_NAME=betteruptime-cli
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-SCRIPT=betteruptime
+API_URL="https://betteruptime.com/api/v2"
 DEBUG="0"
+REQUIRED_APPS=("jq" "column")
 
 # -- Colors
-RED="\e[31m"
-GREEN="\e[32m"
-CYAN="\e[36m"
-BLUEBG="\e[44m"
-YELLOWBG="\e[43m"
-GREENBG="\e[42m"
-DARKGREYBG="\e[100m"
-ECOL="\e[0m"
+export NC='\e[0m' # No Color
+export CBLACK='\e[0;30m'
+export CGRAY='\e[1;30m'
+export CRED='\e[0;31m'
+export CLIGHT_RED='\e[1;31m'
+export CGREEN='\e[0;32m'
+export CLIGHT_GREEN='\e[1;32m'
+export CBROWN='\e[0;33m'
+export CYELLOW='\e[1;33m'
+export CBLUE='\e[0;34m'
+export CLIGHT_BLUE='\e[1;34m'
+export CPURPLE='\e[0;35m'
+export CLIGHT_PURPLE='\e[1;35m'
+export CCYAN='\e[0;36m'
+export CLIGHT_CYAN='\e[1;36m'
+export CLIGHT_GRAY='\e[0;37m'
+export CWHITE='\e[1;37m'
 
-# -------
-# -- Help
-# -------
+# ==================================
+# -- Usage
+# ==================================
 USAGE_FOOTER=\
 "Version: $VERSION
-Type $SCRIPT help for more."
+Type $SCRIPT_NAME help for more."
 
 USAGE=\
-"$SCRIPT [-a <apikey>|-d] <command>
+"$SCRIPT_NAME [-a <apikey>|-d] <command>
 
 Commands:
 	test			 - Test Better Uptime API key.
@@ -52,7 +63,7 @@ ${USAGE_FOOTER}
 "
 
 USAGE_LIST=\
-"$SCRIPT [-a <apikey>|-d] list <object>
+"$SCRIPT_NAME [-a <apikey>|-d] list <object>
 
 Objects:
 	monitors         - Create monitor.
@@ -61,45 +72,36 @@ Objects:
 ${USAGE_FOOTER}
 "
 
-
-
-# ------------
-# -- Functions
-# ------------
-
-# -- _error
-_error () {
-    echo -e "${RED}** ERROR ** - $@ ${ECOL}"
-}
-
-_success () {
-    echo -e "${GREEN}** SUCCESS ** - $@ ${ECOL}"
-}
-
-_running () {
-    echo -e "${BLUEBG}${@}${ECOL}"
-}
-
-_creating () {
-    echo -e "${DARKGREYBG}${@}${ECOL}"
-}
-
-_separator () {
-    echo -e "${YELLOWBG}****************${ECOL}"
-}
-
+# ==================================
+# -- Core Functions
+# ==================================
+# -- _debug
 _debug () {
-    if [[ -f $SCRIPT_DIR/.debug ]] || [[ $DEBUG == "1" ]]; then
-        echo -e "${CYAN}** DEBUG: $@${ECOL}"
+    if [[ $DEBUG -ge "1" ]]; then
+        echo -e "${CCYAN}**** DEBUG ${*}${NC}"
     fi
 }
 
+# -- messages
+_error () { echo -e "${CRED}** ERROR ** - ${*} ${ECOL}"; } # _error
+_success () { echo -e "${CGREEN}** SUCCESS ** - ${*} ${ECOL}"; } # _success
+_running () { echo -e "${BLUEBG}${*}${ECOL}"; } # _running
+_creating () { echo -e "${DARKGREYBG}${*}${ECOL}"; }
+_separator () { echo -e "${YELLOWBG}****************${ECOL}"; }
+_debug () {
+    if [[ $DEBUG == "1" ]]; then
+        echo -e "${CCYAN}** DEBUG: ${*}${ECOL}"
+    fi
+}
+
+# -- debug_json
 _debug_json () {
-    if [ -f $SCRIPT_DIR/.debug ]; then
-        echo $@ | jq
+    if [[ $DEBUG_JSON == "1" ]]; then
+        echo "${@}" | jq
     fi
 }
 
+# -- usage
 usage () {
 	if [[ -z $1 ]]; then
 	    echo "$USAGE"
@@ -109,7 +111,84 @@ usage () {
 	fi
 }
 
-# -- options
+# ==================================
+# -- Functions
+# ==================================
+
+# -- pre_flight_check
+function pre_flight_check () {
+	# -- Check for better uptime api key in file or shell variable
+    _debug "Checking for Better Uptime API Key"
+    if [[ -f ~/.betteruptime ]]; then
+		_debug "Found $HOME/.betteruptime"
+	    source "$HOME/.betteruptime"
+	else
+		if [[ ! $BETTER_UPTIME_API ]]; then
+            usage
+	        _error "Can't find $HOME/.betteruptime or \$BETTER_UPTIME_APIKEY in shell...exiting."	    
+	        exit 1
+        fi
+	fi
+
+    # -- Check if $REQUIRED_APPS are installed
+    for CMD in "${REQUIRED_APPS[@]}"; do
+        if ! command -v "$CMD" &> /dev/null; then
+        _error "$CMD is not installed"
+        fi
+    done
+
+}
+
+# -- betteruptime-api <$API_PATH>
+betteruptime-api() {
+	_debug "Running betteruptime-api() with ${*}"
+	local $API_PATH	
+	API_PATH=$1
+
+	#if [[ $DEBUG == "1" ]];then set +x;fi
+	CURL_OUTPUT=$(curl -s --request GET \
+		 --url "${API_URL}${API_PATH}" \
+		 --header 'Authorization: Bearer '"${BU_KEY}"'')
+	#if [[ $DEBUG == "1" ]];then set -x;fi
+	
+	CURL_EXIT_CODE="$?"
+	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
+		_error "Error from API: ${CURL_EXIT_CODE}"
+		return 1
+	elif [[ $CURL_OUTPUT == *"error"* ]]; then
+		_error "Error from API: $CURL_OUTPUT"	
+		_debug "$CURL_OUTPUT"
+		return 1
+	else
+	 	_debug "Success from API: $CURL_OUTPUT"
+	 	_debug "$CURL_OUTPUT"
+	fi
+}
+
+# -- betteruptime-api-test
+betteruptime-api-test() {	
+	betteruptime-api /api/v2/monitors	
+	_debug "\$CURL_EXIT_CODE: $CURL_EXIT_CODE"
+	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
+        _error "Better Uptime API connection not working!"
+        exit 1
+	else
+		_success "Better Uptime API connection working!"
+		exit 0
+	fi
+}
+
+# ==================================
+# -- Arguments
+# ==================================
+
+# -- check if parameters are set
+_debug "PARAMS: ${*}"
+if [[ -z ${*} ]];then
+	usage
+	exit 1
+fi
+
 POSITIONAL=()
 while [[ $# -gt 0 ]]
 do
@@ -140,97 +219,39 @@ esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
-# -- betteruptime-api <$API_PATH>
-betteruptime-api() {
-	_debug "Running betteruptime-api() with $@"
-	local $API_PATH	
-	API_PATH=$1
-
-	#if [[ $DEBUG == "1" ]];then set +x;fi
-	CURL_OUTPUT=$(curl -s --request GET \
-		 --url "https://betteruptime.com${API_PATH}" \
-		 --header 'Authorization: Bearer '"${BU_KEY}"'')
-	#if [[ $DEBUG == "1" ]];then set -x;fi
-	
-	CURL_EXIT_CODE="$?"
-	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
-		_error "Error from API: ${CURL_EXIT_CODE}"
-		return 1
-	elif [[ $CURL_OUTPUT == *"error"* ]]; then
-		_error "Error from API: $CURL_OUTPUT"	
-		_debug "$CURL_OUTPUT"
-		return 1
-	else
-	 	_debug "Success from API: $CURL_OUTPUT"
-	 	_debug "$CURL_OUTPUT"
-	fi
-}
-
-# -- betteruptime-api-creds
-betteruptime-api-creds() {
-	if [[ -f ~/.betteruptime ]]; then
-		_debug "Found $HOME/.betteruptime"
-	    source $HOME/.betteruptime
-	else
-		usage
-	    _error "Can't find $HOME/.cloudflare exiting."	    
-	    exit 1
-	fi
-}
-
-# -- betteruptime-api-test
-betteruptime-api-test() {	
-	betteruptime-api /api/v2/monitors	
-	_debug "\$CURL_EXIT_CODE: $CURL_EXIT_CODE"
-	if [[ $CURL_EXIT_CODE -ge "1" ]]; then
-        _error "Better Uptime API connection not working!"
-        exit 1
-	else
-		_success "Better Uptime API connection working!"
-		exit 0
-	fi
-}
-
-# ------------
-# -- Main loop
-# ------------
+# ==================================
+# -- Main Loop
+# ==================================
 
 # -- check better uptime credentials
-betteruptime-api-creds
+pre_flight_check
 
-# -- check if parameters are set
-_debug "PARAMS: $@"
-if [[ -z $1 ]];then
-	usage
-	exit 1
-fi
-
-# -- commands
+# -- Loop
 CMD1=$1
 _debug "\$CMD1:$CMD1"
 shift
     case "$CMD1" in
-        # -- usage
+        #### usage
         help)
-		usage
-		exit
+		    usage
+		    exit
         ;;
 
-		# -- test
+		#### test
         test)
-        betteruptime-api-test
+            betteruptime-api-test
 		;;
 		
-        # -- list
+        #### list
         list)
         CMD2=$1
         _debug "\$CMD2:$CMD2"
         shift
-        	case "$CMD2" in
-        		# -- monitors
-        		monitors)
+            case "$CMD2" in
+                # -- monitors
+                monitors)
 					betteruptime-api /api/v2/monitors
-        			if [[ $JSON_OUTPUT == "1" ]]; then
+                    if [[ $JSON_OUTPUT == "1" ]]; then
 						echo $CURL_OUTPUT
 						exit
 					else
@@ -249,23 +270,23 @@ shift
 						printf "$PARSED_OUTPUT" | awk -v h="$HEADER_OUTPUT" '{print}; NR % 10 == 0 {print "\n" h}'
 						exit
 					fi
-        		;;
-        		heartbeats)
-        		echo "heartbeats"
-        		exit
+                ;;
+                heartbeats)
+                    echo "heartbeats"
+                    exit
         		;;
         		*)
-        		usage LIST
-        		exit 1
+                    usage LIST
+                    exit 1
         	esac
         ;;
 
-		# -- add
+		#### add
         add)
 		echo "add"
         ;;
 
-		# -- catchall
+		#### catchall
         *)
         usage
         _error "No command specified"
